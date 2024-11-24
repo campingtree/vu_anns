@@ -62,10 +62,13 @@ class SatellitePatchesDataset(Dataset):
         self.dir_multichannel = dir_multichannel
         self.labels_df = pd.read_csv(label_file, names=['ImageId', 'ClassType', 'MultipolygonWKT'], skiprows=1)
         self.scaling_data_df = pd.read_csv(grid_file, names=['ImageId', 'Xmax', 'Ymin'], skiprows=1)
-        self.image_ids = self.labels_df['ImageId'].unique()#[:1] # BUG: for quicker testing <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+        self.image_ids = self.labels_df['ImageId'].unique()
         self.class_ids = class_ids
         self.image_size = image_size
         self.patch_size = patch_size
+
+        # Eagerly load images
+        self.images = {x: self._get_image(x, self.image_size) for x in self.image_ids}
 
         self.dih4_transforms = Dih4Transforms.get_transforms() if use_dih4_transforms else None
 
@@ -88,8 +91,8 @@ class SatellitePatchesDataset(Dataset):
     def __getitem__(self, idx):
         image_id = self.image_ids[idx // self.patches_per_image]
 
-        # Get image and generate mask
-        image = self._get_image(image_id, self.image_size)
+        # Lookup image and generate mask
+        image = self.images[image_id]
         mask = self._create_multiclass_mask(image_id)
 
         # Calculate patch position in a given image
@@ -116,32 +119,32 @@ class SatellitePatchesDataset(Dataset):
                 patch_mask = self.dih4_transforms[trans_id](patch_mask)
 
         # TODO: cleanup or write a helper function and leave only one call commented out here
-        fig, ax = plt.subplots(2, 6, figsize=(12, 6))
-        ax[0, 0].imshow((patch_image[:3,:,:] / patch_image[:3,:,:].max()).permute(1, 2, 0))
-        ax[0, 0].set_title("RGB Image")
-        ax[0, 1].imshow(patch_mask[0], cmap='gray')
-        ax[0, 1].set_title('Mask 1')
-        ax[0, 2].imshow(patch_mask[1], cmap='gray')
-        ax[0, 2].set_title('Mask 2')
-        ax[0, 3].imshow(patch_mask[2], cmap='gray')
-        ax[0, 3].set_title('Mask 3')
-        ax[0, 4].imshow(patch_mask[3], cmap='gray')
-        ax[0, 4].set_title('Mask 4')
-        ax[0, 5].imshow(patch_mask[4], cmap='gray')
-        ax[0, 5].set_title('Mask 5')
-        ax[1, 0].imshow(patch_mask[5], cmap='gray')
-        ax[1, 0].set_title('Mask 6')
-        ax[1, 1].imshow(patch_mask[6], cmap='gray')
-        ax[1, 1].set_title('Mask 7')
-        ax[1, 2].imshow(patch_mask[7], cmap='gray')
-        ax[1, 2].set_title('Mask 8')
-        ax[1, 3].imshow(patch_mask[8], cmap='gray')
-        ax[1, 3].set_title('Mask 9')
-        ax[1, 4].imshow(patch_mask[9], cmap='gray')
-        ax[1, 4].set_title('Mask 10')
-        fig.delaxes(ax[1, 5])
-        plt.tight_layout()
-        plt.show()
+        # fig, ax = plt.subplots(2, 6, figsize=(12, 6))
+        # ax[0, 0].imshow((patch_image[:3,:,:] / patch_image[:3,:,:].max()).permute(1, 2, 0))
+        # ax[0, 0].set_title("RGB Image")
+        # ax[0, 1].imshow(patch_mask[0], cmap='gray')
+        # ax[0, 1].set_title('Mask 1')
+        # ax[0, 2].imshow(patch_mask[1], cmap='gray')
+        # ax[0, 2].set_title('Mask 2')
+        # ax[0, 3].imshow(patch_mask[2], cmap='gray')
+        # ax[0, 3].set_title('Mask 3')
+        # ax[0, 4].imshow(patch_mask[3], cmap='gray')
+        # ax[0, 4].set_title('Mask 4')
+        # ax[0, 5].imshow(patch_mask[4], cmap='gray')
+        # ax[0, 5].set_title('Mask 5')
+        # ax[1, 0].imshow(patch_mask[5], cmap='gray')
+        # ax[1, 0].set_title('Mask 6')
+        # ax[1, 1].imshow(patch_mask[6], cmap='gray')
+        # ax[1, 1].set_title('Mask 7')
+        # ax[1, 2].imshow(patch_mask[7], cmap='gray')
+        # ax[1, 2].set_title('Mask 8')
+        # ax[1, 3].imshow(patch_mask[8], cmap='gray')
+        # ax[1, 3].set_title('Mask 9')
+        # ax[1, 4].imshow(patch_mask[9], cmap='gray')
+        # ax[1, 4].set_title('Mask 10')
+        # fig.delaxes(ax[1, 5])
+        # plt.tight_layout()
+        # plt.show()
 
         return patch_image, patch_mask
 
@@ -218,14 +221,6 @@ class SatellitePatchesDataset(Dataset):
                 dtype=np.uint8
         )
 
-        # TODO: cleanup or write a helper function and leave only one call commented out here
-        # print(mask.nonzero())
-        # fig, ax = plt.subplots(1, 2, figsize=(12, 6))
-        # ax[0].imshow((image[:3,:,:] / image[:3,:,:].max()).permute(1, 2, 0))
-        # ax[0].set_title("RGB Image")
-        # ax[1].imshow(mask, cmap="gray")
-        # ax[1].set_title("Generated Mask")
-        # plt.show()
         return torch.from_numpy(mask)  # HxW
 
     def _create_multiclass_mask(self, image_id):

@@ -166,7 +166,7 @@ class SatellitePatchesDataset(Dataset):
         if interpolate_size:
             img_rgb_interp = F.interpolate(img_rgb.unsqueeze(0),
                                             size=(interpolate_size, interpolate_size),
-                                            mode='bicubic',
+                                            mode='bilinear',
                                             align_corners=False)  # BxCxHxW
             img_rgb = img_rgb_interp.squeeze(0)  # CxHxW
 
@@ -180,7 +180,7 @@ class SatellitePatchesDataset(Dataset):
             for i in range(len(imgs_multichannel)):
                 img_multichannel_interp = F.interpolate(imgs_multichannel[i].unsqueeze(0),
                                                       size=(interpolate_size, interpolate_size),
-                                                      mode='bicubic',
+                                                      mode='bilinear',
                                                       align_corners=False)  # BxCxHxW
                 imgs_multichannel[i] = img_multichannel_interp.squeeze(0)  # CxHxW
 

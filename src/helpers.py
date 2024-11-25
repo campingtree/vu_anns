@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import torch.nn.functional as F
 import torch
 from sklearn.model_selection import train_test_split
+from torch.utils.data import DataLoader
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import euclidean_distances
 
@@ -226,23 +227,67 @@ def visualize_tif_multi(path, interpolate_size=None):
     plt.show()
 
 
+def calculate_mean_stddev(dataset):
+    """
+    Calculates mean and standard deviation for all channels in dataset (per patch).
+    """
+    dataloader = DataLoader(dataset, batch_size=42, shuffle=False)
+    mean = 0.0
+    std = 0.0
+    n_samples = 0
+
+    for images, _ in dataloader:
+        batch_size = images.shape[0]
+        channel_size = images.shape[1]
+
+        # Flatten to BxCx(HxW)
+        images = images.cuda().view(batch_size, channel_size, -1)
+
+        # Compute mean/std per channel
+        batch_mean = images.mean(dim=(0,2))
+        batch_std = images.std(dim=(0,2))
+
+        # Accumulate per channel
+        mean += batch_mean * batch_size
+        std += batch_std * batch_size
+        n_samples += batch_size
+
+    mean /= n_samples
+    std /= n_samples
+
+    return mean.cpu().tolist(), std.cpu().tolist()
+
 if __name__ == '__main__':
-    dataset = data.SatellitePatchesDataset(
-            dir_rgb=data.THREE_BAND_DATA_PATH,
-            dir_multichannel=data.SIXTEEN_BAND_DATA_PATH,
-            label_file=data.TRAINING_WKT_PATH,
-            grid_file=data.GRID_SIZES_PATH,
+    # dataset = data.SatellitePatchesDataset(
+    #         dir_rgb=data.THREE_BAND_DATA_PATH,
+    #         dir_multichannel=data.SIXTEEN_BAND_DATA_PATH,
+    #         label_file=data.TRAINING_WKT_PATH,
+    #         grid_file=data.GRID_SIZES_PATH,
+    #         class_ids=list(data.CLASS_TYPES.keys()),
+    #         image_size=3360,
+    #         patch_size=224,
+    #         use_dih4_transforms=False
+    #     )
+    train_dataset = data.SatellitePatchesDataset(
+            dir_rgb=data.TRAIN_THREE_BAND_DATA_PATH,
+            dir_multichannel=data.TRAIN_SIXTEEN_BAND_DATA_PATH,
+            label_file=data.TRAIN_TRAINING_WKT_PATH,
+            grid_file=data.TRAIN_GRID_SIZES_PATH,
             class_ids=list(data.CLASS_TYPES.keys()),
             image_size=3360,
             patch_size=224,
             use_dih4_transforms=False
         )
-    splitter = SatellitePatchesDatasetSplitter(
-        dataset=dataset
-    )
-    train_image_ids, val_image_ids = splitter.split_to_train_and_val(plot_dist=True)
-    print(f'Training images: {train_image_ids}')
-    print(f'Validation images: {val_image_ids}')
+    mean, std = calculate_mean_stddev(train_dataset)
+    print(f'Mean: {mean}\nStd: {std}')
+
+    # splitter = SatellitePatchesDatasetSplitter(
+    #     dataset=dataset
+    # )
+    # train_image_ids, val_image_ids = splitter.split_to_train_and_val(plot_dist=True)
+    # print(f'Training images: {train_image_ids}')
+    # print(f'Validation images: {val_image_ids}')
+
     # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6110_0_1.tif')
     # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6110_1_1.tif')
     # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6100_2_3.tif')

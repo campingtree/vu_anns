@@ -14,7 +14,7 @@ import data
 import model
 
 
-
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def worker_init_fn(worker_id):
@@ -47,7 +47,7 @@ def calc_dice(pred, target, smooth=1e-6):
     return dice.mean(dim=0)  # (C,)
 
 
-def eval_model(model, eval_dataloader, epoch, device, criterion=None, ts_writer=None, threshold=0.5):
+def eval_model(model, eval_dataloader, epoch, device, criterion, threshold=0.5):
     """
     Evaluates the model using IoU and Dice Coefficient
     """
@@ -55,27 +55,22 @@ def eval_model(model, eval_dataloader, epoch, device, criterion=None, ts_writer=
     iou_scores = []
     dice_scores = []
 
-    ts_writen = False
-
     running_loss = 0.0
     total_batches = 0
 
     with torch.no_grad():
         for images, masks in eval_dataloader:
             images = images.to(device)
-            masks = masks.to(device)
+            masks = masks.to(device).float()
 
-            # Forward
             outputs = model(images)
-            preds = outputs > threshold
+            preds = (outputs > threshold).float()
 
-            if criterion:
-                loss = criterion(outputs, masks.float())
-                running_loss += loss.item()
+            loss = criterion(outputs, masks)
 
             # Calculate metrics
-            iou = calc_iou(preds.float(), masks.float())
-            dice = calc_dice(preds.float(), masks.float())
+            iou = calc_iou(preds, masks)
+            dice = calc_dice(preds, masks)
 
             iou_scores.append(iou)
             dice_scores.append(dice)
@@ -93,24 +88,19 @@ def eval_model(model, eval_dataloader, epoch, device, criterion=None, ts_writer=
 
                 # ts_writer.add_histogram('Sample/Distribution', preds, epoch)
 
+            running_loss += loss.item()
             total_batches += 1
 
-    if ts_writer and criterion:
-        ts_writer.add_scalar(f'Loss/Average validation batch loss', running_loss / total_batches, epoch)
 
     # Average metrics across batches
+    avg_batch_loss = running_loss / total_batches
     mean_iou = torch.stack(iou_scores, dim=0).mean(dim=0).cpu()
     mean_dice = torch.stack(dice_scores, dim=0).mean(dim=0).cpu()
 
-    return running_loss / total_batches, {'IoU': mean_iou, 'Dice': mean_dice}
+    return {'Loss': avg_batch_loss, 'IoU': mean_iou, 'Dice': mean_dice}
 
 
 if __name__ == '__main__':
-    unet = model.UNet(20, 10)
-    # TODO: maybe I should initialize model weights using some strategy?
-    print(f'Total parameters in model:  {sum(p.numel() for p in unet.parameters())}')
-    print(f'Total trainable parameters in model:  {sum(p.numel() for p in unet.parameters() if p.requires_grad)}')
-
     train_dataset = data.SatellitePatchesDataset(
         dir_rgb=data.TRAIN_THREE_BAND_DATA_PATH,
         dir_multichannel=data.TRAIN_SIXTEEN_BAND_DATA_PATH,
@@ -119,21 +109,21 @@ if __name__ == '__main__':
         class_ids=list(data.CLASS_TYPES.keys()),
         image_size=3360,
         patch_size=224,
-        use_dih4_transforms=True
-        # transform=T.transforms.Compose([
+        use_dih4_transforms=True, # BUG: kinda inconsistent now, dih4 applied per image, normalize per patch?
+        transform=T.transforms.Compose([
+            T.Normalize(
+                mean=[443.364, 475.359, 337.357, 4374.448, 4753.808, 4407.794, 3952.333, 3118.967, 2802.66, 2726.332,
+                      2649.713, 300.996, 337.497, 475.59, 502.32, 443.828, 533.503, 671.433, 523.904, 502.551],
+                std=[63.389, 46.704, 24.334, 488.665, 653.793, 587.365, 544.229, 527.288, 460.02, 479.865, 482.814,
+                     12.552, 24.351, 46.557, 60.684, 63.107, 60.408, 83.752, 66.97, 53.74]),
         #     # T.ToTensor(),
-        #     # TODO: these come from ImageNet. Since I'm not using pretrained model/backbone,
-        #     #  calc these for my dataset before using
-        #     # T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         #     # TODO: bellow have a mathematical name (smth Dih4 group). Find it and refer to it.
         #     # T.RandomHorizontalFlip(),
         #     # T.RandomVerticalFlip(),
         #     T.RandomRotation(180),
-        # ])
+        ])
     )
     print('Train dataset size:', len(train_dataset))
-    train_dataset[500]
-    exit(1)
     val_dataset = data.SatellitePatchesDataset(
         dir_rgb=data.VAL_THREE_BAND_DATA_PATH,
         dir_multichannel=data.VAL_SIXTEEN_BAND_DATA_PATH,
@@ -142,112 +132,88 @@ if __name__ == '__main__':
         class_ids=list(data.CLASS_TYPES.keys()),
         image_size=3360,
         patch_size=224,
-        use_dih4_transforms=True
-        # transform=T.transforms.Compose([
-        #     # T.ToTensor(),
-        #     # TODO: these come from ImageNet. Since I'm not using pretrained model/backbone,
-        #     #  calc these for my dataset before using
-        #     # T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        #     # TODO: bellow have a mathematical name (smth Dih4 group). Find it and refer to it.
-        #     # T.RandomHorizontalFlip(),
-        #     # T.RandomVerticalFlip(),
-        #     T.RandomRotation(180),
-        # ])
+        use_dih4_transforms=True,
+        transform=T.transforms.Compose([
+            T.Normalize(
+                mean=[443.364, 475.359, 337.357, 4374.448, 4753.808, 4407.794, 3952.333, 3118.967, 2802.66, 2726.332,
+                      2649.713, 300.996, 337.497, 475.59, 502.32, 443.828, 533.503, 671.433, 523.904, 502.551],
+                std=[63.389, 46.704, 24.334, 488.665, 653.793, 587.365, 544.229, 527.288, 460.02, 479.865, 482.814,
+                     12.552, 24.351, 46.557, 60.684, 63.107, 60.408, 83.752, 66.97, 53.74]),
+        ])
     )
     print('Val dataset size:', len(val_dataset))
-    # patch, mask = train_dataset[500]
-    # print('\n\n\n')
-    # print(patch.shape)
-    # print(mask.shape)
-    # exit(1)
-    # loader = DataLoader(train_dataset, batch_size=5, shuffle=False, num_workers=2, worker_init_fn=worker_init_fn)
-    # i = 0
-    # for img_patch_batch, mask_patch_batch in loader:
-        # train_dataset.set_epoch(i) # i is not epoch...
-        # print(f'\nBATCH {i}\n')
-        # fig, ax = plt.subplots(2, 6, figsize=(12, 6))
-        # ax[0, 0].imshow((img_patch_batch[-1,:3,:,:] / img_patch_batch[-1,:3,:,:].max()).permute(1, 2, 0))
-        # ax[0, 0].set_title("RGB Image")
-        # ax[0, 1].imshow(mask_patch_batch[-1, 0], cmap='gray')
-        # ax[0, 1].set_title('Mask 1')
-        # ax[0, 2].imshow(mask_patch_batch[-1, 1], cmap='gray')
-        # ax[0, 2].set_title('Mask 2')
-        # ax[0, 3].imshow(mask_patch_batch[-1, 2], cmap='gray')
-        # ax[0, 3].set_title('Mask 3')
-        # ax[0, 4].imshow(mask_patch_batch[-1, 3], cmap='gray')
-        # ax[0, 4].set_title('Mask 4')
-        # ax[0, 5].imshow(mask_patch_batch[-1, 4], cmap='gray')
-        # ax[0, 5].set_title('Mask 5')
-        # ax[1, 0].imshow(mask_patch_batch[-1, 5], cmap='gray')
-        # ax[1, 0].set_title('Mask 6')
-        # ax[1, 1].imshow(mask_patch_batch[-1, 6], cmap='gray')
-        # ax[1, 1].set_title('Mask 7')
-        # ax[1, 2].imshow(mask_patch_batch[-1, 7], cmap='gray')
-        # ax[1, 2].set_title('Mask 8')
-        # ax[1, 3].imshow(mask_patch_batch[-1, 8], cmap='gray')
-        # ax[1, 3].set_title('Mask 9')
-        # ax[1, 4].imshow(mask_patch_batch[-1, 9], cmap='gray')
-        # ax[1, 4].set_title('Mask 10')
-        # fig.delaxes(ax[1, 5])
-        # plt.tight_layout()
-        # plt.show()
-        # if (i+1) % 14 == 0:
-        #     break
-        # i += 1
-        # continue
-    # exit(0)
-    # TODO: probably send it in batches (3rd suggested using batches instead of larger img patches)
-    batch_size = 16
-    num_workers = 6
+
+    # Configure data loaders
+    batch_size = 42
+    num_workers = 0
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, worker_init_fn=worker_init_fn)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, worker_init_fn=worker_init_fn)
 
+    # Configure TensorBoard writer
     ts_writer = SummaryWriter(log_dir='runs/stage-2')
 
-    # TODO: something better? Ask if other stuff is maybe better for satellite images (Nadam?)
-    # TODO: consider using Adam at first epochs, then switching to slower SGD for better accuracy
-    unet = unet.cuda()
+    # Configure model, optimizer, scheduler, loss
+    # TODO: maybe I should initialize model weights using some strategy?
+    unet = model.UNet(20, 10).to(DEVICE)
     optimizer = optim.Adam(unet.parameters(), lr=0.001)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5) #
-    criterion = nn.BCELoss().cuda() # Consider using BCEWithLogitsLoss (does internal Sigmoid) and use pos_weight param to ADDRESS CLASS IMBALANCE
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
+    criterion = nn.BCELoss().to(DEVICE)
+
+    n_epochs = 100
 
     try:
-        for epoch in range(1, 100 + 1):
+        for epoch in range(1, n_epochs+1):
             unet.train()
+
+            start_time = time.time()
             running_loss = 0.0
             total_batches = 0
+
             train_dataset.set_epoch(epoch)
-            start_time = time.time()
-            for images, masks in val_loader: #  BUG: testing, switch to train set <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-                images = images.cuda()
-                masks = masks.float().cuda()
+
+            for images, masks in train_loader:
+                images = images.to(DEVICE)
+                masks = masks.float().to(DEVICE)
+
                 optimizer.zero_grad()
                 out = unet(images)
                 loss = criterion(out, masks)
                 loss.backward()
                 optimizer.step()
-                running_loss += loss.item() # TODO: how does BCE work? Do I get a scalar here?
+
+                running_loss += loss.item()
                 total_batches += 1
-                print('Batch completed')
+                print('Finished batch')
+
+            # Sync cuda kernels for more accurate time measurement
+            torch.cuda.synchronize()
             epoch_duration = time.time() - start_time
-            ts_writer.add_scalar('Time/Epoch', epoch_duration, epoch)
-            avg_val_loss, metrics = eval_model(unet, val_loader, epoch, 'cuda', criterion=nn.BCELoss().cuda(), ts_writer=ts_writer) # TODO: <<<<<<<<<<<<< need global device flag
-            scheduler.step(avg_val_loss)
-            print(f'Epoch [{epoch}/{100}]: \n'
-                  f'Avg. batch loss.: {running_loss / total_batches}\n'
+
+            # Get evaluation metrics on validation set
+            metrics = eval_model(unet, val_loader, epoch, DEVICE, criterion)
+            mean_iou = metrics['IoU'].mean()
+            mean_dice = metrics['Dice'].mean()
+
+            # Use validation loss to step optimizer scheduler
+            scheduler.step(metrics['Loss'])
+
+            print(f'Epoch [{epoch}/{n_epochs}]: \n'
+                  f'Avg. batch loss: {running_loss / total_batches}\n'
+                  f'Avg. validation batch loss: {metrics['Loss']}'
                   f'Mean IoU per class: {metrics['IoU']}\n'
-                  f'Mean Dice per class: {metrics['Dice']}\n')
-            # Log to TensorBoard
+                  f'Mean Dice per class: {metrics['Dice']}\n'
+                  f'Mean IoU across classes: {mean_iou}\n'
+                  f'Mean Dice across classes: {mean_dice}\n')
+
+            # Log various metrics to TensorBoard
+            ts_writer.add_scalar('Time/Epoch', epoch_duration, epoch)
             ts_writer.add_scalar(f'Loss/Average batch loss', running_loss / total_batches, epoch)
+            ts_writer.add_scalar(f'Loss/Average validation batch loss', metrics['Loss'], epoch)
             for class_idx, (iou_score, dice_score) in enumerate(zip(metrics['IoU'], metrics['Dice'])):
                 ts_writer.add_scalar(f"IoU/Class_{class_idx}", iou_score, epoch)
                 ts_writer.add_scalar(f"Dice/Class_{class_idx}", dice_score, epoch)
-
-            mean_iou = metrics['IoU'].mean()
-            mean_dice = metrics['Dice'].mean()
             ts_writer.add_scalar("Mean IoU", mean_iou, epoch)
             ts_writer.add_scalar("Mean Dice", mean_dice, epoch)
-
             for param_group in optimizer.param_groups:
                 ts_writer.add_scalar('Learning rate', param_group['lr'] , epoch)
     finally:

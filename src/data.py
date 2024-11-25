@@ -57,7 +57,8 @@ class SatellitePatchesDataset(Dataset):
                  class_ids,
                  image_size=3360,
                  patch_size=224,
-                 use_dih4_transforms=False):
+                 use_dih4_transforms=False,
+                 transform=None):
         self.dir_rgb = dir_rgb
         self.dir_multichannel = dir_multichannel
         self.labels_df = pd.read_csv(label_file, names=['ImageId', 'ClassType', 'MultipolygonWKT'], skiprows=1)
@@ -68,7 +69,12 @@ class SatellitePatchesDataset(Dataset):
         self.patch_size = patch_size
 
         # Eagerly load images
-        self.images = {x: self._get_image(x, self.image_size) for x in self.image_ids}
+        self.images = {}
+        for image_id in self.image_ids:
+            image = self._get_image(image_id, self.image_size)
+            if transform:
+                image = transform(image)
+            self.images[image_id] = image
 
         self.dih4_transforms = Dih4Transforms.get_transforms() if use_dih4_transforms else None
 
@@ -104,7 +110,7 @@ class SatellitePatchesDataset(Dataset):
         patch_image = image[:, patch_row:patch_row+self.patch_size, patch_col:patch_col+self.patch_size]
         patch_mask = mask[:, patch_row:patch_row+self.patch_size, patch_col:patch_col+self.patch_size]
 
-        # Apply transforms unique to specific image
+        # Apply Dih4 transforms unique to specific image
         # TODO: research if patch specific augmentations are worse in my context
         #  (e.g., artifacts at patch boundaries, loss of global context), much easier to implement...
         if self.dih4_transforms:

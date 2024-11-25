@@ -1,3 +1,4 @@
+import os
 import random
 import time
 
@@ -100,6 +101,36 @@ def eval_model(model, eval_dataloader, epoch, device, criterion, threshold=0.5):
     return {'Loss': avg_batch_loss, 'IoU': mean_iou, 'Dice': mean_dice}
 
 
+def save_checkpoint(model, optimizer, scheduler, epoch, loss, save_dir='checkpoints', filename='checkpoint.pth'):
+    """
+    Save model checkpoint.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'scheduler_state_dict': scheduler.state_dict(),
+        'epoch': epoch,
+        'loss': loss
+    }
+    filepath = os.path.join(save_dir, filename)
+    torch.save(checkpoint, filepath)
+
+def load_checkpoint(filepath, model, optimizer=None, scheduler=None):
+    """
+    Load model checkpoint.
+    """
+    checkpoint = torch.load(filepath)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    if optimizer and checkpoint['optimizer_state_dict']:
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    if scheduler and checkpoint['scheduler_state_dict']:
+        scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+    epoch = checkpoint['epoch']
+    loss = checkpoint['loss']
+    return epoch, loss
+
+
 if __name__ == '__main__':
     train_dataset = data.SatellitePatchesDataset(
         dir_rgb=data.TRAIN_THREE_BAND_DATA_PATH,
@@ -159,10 +190,16 @@ if __name__ == '__main__':
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
     criterion = nn.BCELoss().to(DEVICE)
 
+    # Training loop parameters
+    start_epoch = 1
     n_epochs = 100
+    best_val_loss = float('inf')
+    if os.path.isfile('checkpoints/best_model.pth'):
+        print('Found previous best model checkpoint. Using it...')
+        start_epoch, _ = load_checkpoint('checkpoints/best_model.pth', unet, optimizer, scheduler)
 
     try:
-        for epoch in range(1, n_epochs+1):
+        for epoch in range(start_epoch, n_epochs + 1):
             unet.train()
 
             start_time = time.time()
@@ -183,7 +220,7 @@ if __name__ == '__main__':
 
                 running_loss += loss.item()
                 total_batches += 1
-                print('Finished batch')
+                print(f'Epoch [{epoch}/{n_epochs}] Finished batch')
 
             # Sync cuda kernels for more accurate time measurement
             torch.cuda.synchronize()
@@ -216,5 +253,13 @@ if __name__ == '__main__':
             ts_writer.add_scalar("Mean Dice", mean_dice, epoch)
             for param_group in optimizer.param_groups:
                 ts_writer.add_scalar('Learning rate', param_group['lr'] , epoch)
+
+            # Save model checkpoint
+            if metrics['Loss'] < best_val_loss:
+                best_val_loss = metrics['Loss']
+                save_checkpoint(unet, optimizer, scheduler, epoch+1, metrics['Loss'], filename='best_model.pth')
+                print(f'Saved best model checkpoint at epoch {epoch}')
+            save_checkpoint(unet, optimizer, scheduler, epoch+1, metrics['Loss'], filename=f'checkpoint_epoch.pth')
+            print(f'Saved general model checkpoint at epoch {epoch}')
     finally:
         ts_writer.close()

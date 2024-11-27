@@ -1,25 +1,23 @@
-# TODO: sort usings in all files
-import torch
-import torchvision.transforms as T
-from torch.utils.data import Dataset, DataLoader
-import pandas as pd
+import warnings
+import hashlib
 import os
+
+import torch
+from torch.utils.data import Dataset
+import torch.nn.functional as F
+import numpy as np
+import pandas as pd
 import rasterio
 from rasterio.features import rasterize
-import warnings
 from rasterio.errors import NotGeoreferencedWarning
-warnings.filterwarnings("ignore", category=NotGeoreferencedWarning) # TODO: move this to some central place
-import numpy as np
-import torch.nn.functional as F
-import matplotlib.pyplot as plt
 from shapely.wkt import loads as wkt_loads
-import shapely
-from functools import partial
 from shapely.ops import transform as shapely_transform
-import hashlib
 
 from transforms import Dih4Transforms
+import helpers
 
+
+warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
 
 THREE_BAND_DATA_PATH = '../../dstl-satellite-imagery-feature-detection/three_band'
 SIXTEEN_BAND_DATA_PATH = '../../dstl-satellite-imagery-feature-detection/sixteen_band'
@@ -58,7 +56,9 @@ class SatellitePatchesDataset(Dataset):
                  image_size=3360,
                  patch_size=224,
                  use_dih4_transforms=False,
-                 transform=None):
+                 transform=None,
+                 load_images_eagerly=False,
+                 create_masks_eagerly=False):
         self.dir_rgb = dir_rgb
         self.dir_multichannel = dir_multichannel
         self.labels_df = pd.read_csv(label_file, names=['ImageId', 'ClassType', 'MultipolygonWKT'], skiprows=1)
@@ -68,13 +68,21 @@ class SatellitePatchesDataset(Dataset):
         self.image_size = image_size
         self.patch_size = patch_size
 
-        # Eagerly load images
+        # Optionally load images eagerly
         self.images = {}
-        for image_id in self.image_ids:
-            image = self._get_image(image_id, self.image_size)
-            if transform:
-                image = transform(image)
-            self.images[image_id] = image
+        if load_images_eagerly:
+            for image_id in self.image_ids:
+                image = self._get_image(image_id, self.image_size)
+                if transform:
+                    image = transform(image)
+                self.images[image_id] = image
+
+        # Optionally compute masks eagerly
+        self.masks = {}
+        if create_masks_eagerly:
+            for image_id in self.image_ids:
+                mask = self._create_multiclass_mask(image_id)
+                self.masks[image_id] = mask
 
         self.dih4_transforms = Dih4Transforms.get_transforms() if use_dih4_transforms else None
 
@@ -97,9 +105,15 @@ class SatellitePatchesDataset(Dataset):
     def __getitem__(self, idx):
         image_id = self.image_ids[idx // self.patches_per_image]
 
-        # Lookup image and generate mask
-        image = self.images[image_id]
-        mask = self._create_multiclass_mask(image_id)
+        # Get image and mask
+        if self.images:
+            image = self.images[image_id]
+        else:
+            image = self._get_image(image_id, self.image_size)
+        if self.masks:
+            mask = self.masks[image_id]
+        else:
+            mask = self._create_multiclass_mask(image_id)
 
         # Calculate patch position in a given image
         patch_id = idx % self.patches_per_image
@@ -111,8 +125,6 @@ class SatellitePatchesDataset(Dataset):
         patch_mask = mask[:, patch_row:patch_row+self.patch_size, patch_col:patch_col+self.patch_size]
 
         # Apply Dih4 transforms unique to specific image
-        # TODO: research if patch specific augmentations are worse in my context
-        #  (e.g., artifacts at patch boundaries, loss of global context), much easier to implement...
         if self.dih4_transforms:
             with torch.random.fork_rng():
                 seed = int(hashlib.md5(f'{image_id}{self.epoch_seed}'.encode()).hexdigest()[:16], 16)
@@ -120,37 +132,10 @@ class SatellitePatchesDataset(Dataset):
                 torch.cuda.manual_seed(seed)
                 torch.cuda.manual_seed_all(seed)
                 trans_id = torch.randint(0, len(self.dih4_transforms), (1,)).item()
-                # print(f'ImageId: {image_id}, transform id: {trans_id}')
                 patch_image = self.dih4_transforms[trans_id](patch_image)
                 patch_mask = self.dih4_transforms[trans_id](patch_mask)
 
-        # TODO: cleanup or write a helper function and leave only one call commented out here
-        # fig, ax = plt.subplots(2, 6, figsize=(12, 6))
-        # ax[0, 0].imshow((patch_image[:3,:,:] / patch_image[:3,:,:].max()).permute(1, 2, 0))
-        # ax[0, 0].set_title("RGB Image")
-        # ax[0, 1].imshow(patch_mask[0], cmap='gray')
-        # ax[0, 1].set_title('Mask 1')
-        # ax[0, 2].imshow(patch_mask[1], cmap='gray')
-        # ax[0, 2].set_title('Mask 2')
-        # ax[0, 3].imshow(patch_mask[2], cmap='gray')
-        # ax[0, 3].set_title('Mask 3')
-        # ax[0, 4].imshow(patch_mask[3], cmap='gray')
-        # ax[0, 4].set_title('Mask 4')
-        # ax[0, 5].imshow(patch_mask[4], cmap='gray')
-        # ax[0, 5].set_title('Mask 5')
-        # ax[1, 0].imshow(patch_mask[5], cmap='gray')
-        # ax[1, 0].set_title('Mask 6')
-        # ax[1, 1].imshow(patch_mask[6], cmap='gray')
-        # ax[1, 1].set_title('Mask 7')
-        # ax[1, 2].imshow(patch_mask[7], cmap='gray')
-        # ax[1, 2].set_title('Mask 8')
-        # ax[1, 3].imshow(patch_mask[8], cmap='gray')
-        # ax[1, 3].set_title('Mask 9')
-        # ax[1, 4].imshow(patch_mask[9], cmap='gray')
-        # ax[1, 4].set_title('Mask 10')
-        # fig.delaxes(ax[1, 5])
-        # plt.tight_layout()
-        # plt.show()
+        # helpers.plot_patch_individual_masks(patch_image, patch_mask)
 
         return patch_image, patch_mask
 

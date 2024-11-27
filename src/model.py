@@ -27,8 +27,6 @@ class DoubleConv2d(nn.Module):
         return self.op(x)
 
 
-# TODO: consider constructing this with for loops an "feature maps" arrays.
-#  Because now if I want to change the shape a little bit, it's gonna be aids...
 class UNet(nn.Module):
     def __init__(self, in_channels=3, out_channels=10, batch_norm=True, dropout=0.2):
         super().__init__()

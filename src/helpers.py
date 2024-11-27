@@ -1,19 +1,20 @@
-import rasterio
 import warnings
-from rasterio.errors import NotGeoreferencedWarning
-from sklearn.utils.multiclass import class_distribution
 
-warnings.filterwarnings("ignore", category=NotGeoreferencedWarning) # TODO: move this to some central place
+import torch
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
 import numpy as np
 import matplotlib.pyplot as plt
-import torch.nn.functional as F
-import torch
+import rasterio
+from rasterio.errors import NotGeoreferencedWarning
 from sklearn.model_selection import train_test_split
-from torch.utils.data import DataLoader
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import euclidean_distances
 
 import data
+
+
+warnings.filterwarnings("ignore", category=NotGeoreferencedWarning)
 
 
 class SatellitePatchesDatasetSplitter:
@@ -90,7 +91,6 @@ class SatellitePatchesDatasetSplitter:
 
         return (distribution / total_pixels) if total_pixels > 0 else torch.ones(distribution.shape)
 
-    # TODO: document this...
     @staticmethod
     def _cluster_distributions(distributions, n_clusters):
         """
@@ -105,17 +105,10 @@ class SatellitePatchesDatasetSplitter:
 
         return cluster_labels
 
-    # TODO: document this...
     @staticmethod
     def _redistribute_single_member_clusters(distributions, cluster_labels, min_cluster_size=2):
         """
         Redistributes single-member clusters to the nearest valid cluster.
-        Args:
-            distributions (np.array): Data points used for clustering.
-            cluster_labels (np.array): Initial cluster labels.
-            min_cluster_size (int): Minimum number of members a cluster should have.
-        Returns:
-            np.array: Adjusted cluster labels.
         """
         unique_clusters, counts = np.unique(cluster_labels, return_counts=True)
         single_member_clusters = unique_clusters[counts < min_cluster_size]
@@ -213,7 +206,7 @@ def visualize_tif_multi(path, interpolate_size=None):
 
     if interpolate_size:
         combined_t = torch.from_numpy(combined).unsqueeze(0).unsqueeze(0).float()
-        combined_t_resized = F.interpolate(combined_t, size=interpolate_size, mode='bicubic')
+        combined_t_resized = F.interpolate(combined_t, size=interpolate_size, mode='bilinear')
         combined = combined_t_resized.numpy().squeeze(axis=(0,1))
     combined_norm = combined / combined.max() # [0, 1]
 
@@ -225,7 +218,6 @@ def visualize_tif_multi(path, interpolate_size=None):
     plt.yticks(np.arange(0, combined.shape[0], step=500))
     plt.title(f"Multi-channel(ch:1) image {path}")
     plt.show()
-
 
 def calculate_mean_stddev(dataset):
     """
@@ -257,6 +249,40 @@ def calculate_mean_stddev(dataset):
 
     return mean.cpu().tolist(), std.cpu().tolist()
 
+def plot_patch_and_individual_masks(patch, masks):
+    """
+    Plots a single image patch and all individual binary segmentation masks side by side.
+    """
+    assert masks.shape[0] == 10
+
+    fig, ax = plt.subplots(2, 6, figsize=(12, 6))
+    ax[0, 0].imshow((patch[:3,:,:] / patch[:3,:,:].max()).permute(1, 2, 0))
+    ax[0, 0].set_title("RGB Image")
+    ax[0, 1].imshow(masks[0], cmap='gray')
+    ax[0, 1].set_title('Mask 1')
+    ax[0, 2].imshow(masks[1], cmap='gray')
+    ax[0, 2].set_title('Mask 2')
+    ax[0, 3].imshow(masks[2], cmap='gray')
+    ax[0, 3].set_title('Mask 3')
+    ax[0, 4].imshow(masks[3], cmap='gray')
+    ax[0, 4].set_title('Mask 4')
+    ax[0, 5].imshow(masks[4], cmap='gray')
+    ax[0, 5].set_title('Mask 5')
+    ax[1, 0].imshow(masks[5], cmap='gray')
+    ax[1, 0].set_title('Mask 6')
+    ax[1, 1].imshow(masks[6], cmap='gray')
+    ax[1, 1].set_title('Mask 7')
+    ax[1, 2].imshow(masks[7], cmap='gray')
+    ax[1, 2].set_title('Mask 8')
+    ax[1, 3].imshow(masks[8], cmap='gray')
+    ax[1, 3].set_title('Mask 9')
+    ax[1, 4].imshow(masks[9], cmap='gray')
+    ax[1, 4].set_title('Mask 10')
+
+    fig.delaxes(ax[1, 5])
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == '__main__':
     # dataset = data.SatellitePatchesDataset(
     #         dir_rgb=data.THREE_BAND_DATA_PATH,
@@ -268,18 +294,18 @@ if __name__ == '__main__':
     #         patch_size=224,
     #         use_dih4_transforms=False
     #     )
-    train_dataset = data.SatellitePatchesDataset(
-            dir_rgb=data.TRAIN_THREE_BAND_DATA_PATH,
-            dir_multichannel=data.TRAIN_SIXTEEN_BAND_DATA_PATH,
-            label_file=data.TRAIN_TRAINING_WKT_PATH,
-            grid_file=data.TRAIN_GRID_SIZES_PATH,
-            class_ids=list(data.CLASS_TYPES.keys()),
-            image_size=3360,
-            patch_size=224,
-            use_dih4_transforms=False
-        )
-    mean, std = calculate_mean_stddev(train_dataset)
-    print(f'Mean: {mean}\nStd: {std}')
+    # train_dataset = data.SatellitePatchesDataset(
+    #         dir_rgb=data.TRAIN_THREE_BAND_DATA_PATH,
+    #         dir_multichannel=data.TRAIN_SIXTEEN_BAND_DATA_PATH,
+    #         label_file=data.TRAIN_TRAINING_WKT_PATH,
+    #         grid_file=data.TRAIN_GRID_SIZES_PATH,
+    #         class_ids=list(data.CLASS_TYPES.keys()),
+    #         image_size=3360,
+    #         patch_size=224,
+    #         use_dih4_transforms=False
+    #     )
+    # mean, std = calculate_mean_stddev(train_dataset)
+    # print(f'Mean: {mean}\nStd: {std}')
 
     # splitter = SatellitePatchesDatasetSplitter(
     #     dataset=dataset
@@ -294,5 +320,5 @@ if __name__ == '__main__':
     # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6110_1_2.tif')
     # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6110_1_3.tif')
     # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6110_1_4.tif')
-    # visualize_tif_multi('../../dstl-satellite-imagery-feature-detection/sixteen_band/6010_0_0_P.tif')
-    # visualize_tif_multi('../../dstl-satellite-imagery-feature-detection/sixteen_band/6010_0_0_P.tif', (3000, 3000))
+    visualize_tif_multi('../../dstl-satellite-imagery-feature-detection/sixteen_band/6110_1_3_P.tif')
+    visualize_tif_multi('../../dstl-satellite-imagery-feature-detection/sixteen_band/6110_1_3_P.tif', (3000, 3000))

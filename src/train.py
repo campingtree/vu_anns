@@ -1,25 +1,25 @@
 import os
-import random
+import sys
 import time
+import random
 
 import torch
-from torch.utils.data import DataLoader
-import torch.optim as optim
 import torch.nn as nn
-import torchvision.transforms as T
-import numpy as np
-import matplotlib.pyplot as plt
+import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader
+import torchvision.transforms as T
 
 import data
 import model
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+SEED = random.randrange(sys.maxsize)
 
 
 def worker_init_fn(worker_id):
-    seed = 0
+    seed = SEED
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
@@ -128,6 +128,7 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None):
         scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
     epoch = checkpoint['epoch']
     loss = checkpoint['loss']
+
     return epoch, loss
 
 
@@ -140,21 +141,17 @@ if __name__ == '__main__':
         class_ids=list(data.CLASS_TYPES.keys()),
         image_size=3360,
         patch_size=224,
-        use_dih4_transforms=True, # BUG: kinda inconsistent now, dih4 applied per image, normalize per patch?
+        use_dih4_transforms=True,
         transform=T.transforms.Compose([
             T.Normalize(
                 mean=[443.364, 475.359, 337.357, 4374.448, 4753.808, 4407.794, 3952.333, 3118.967, 2802.66, 2726.332,
                       2649.713, 300.996, 337.497, 475.59, 502.32, 443.828, 533.503, 671.433, 523.904, 502.551],
                 std=[63.389, 46.704, 24.334, 488.665, 653.793, 587.365, 544.229, 527.288, 460.02, 479.865, 482.814,
                      12.552, 24.351, 46.557, 60.684, 63.107, 60.408, 83.752, 66.97, 53.74]),
-        #     # T.ToTensor(),
-        #     # TODO: bellow have a mathematical name (smth Dih4 group). Find it and refer to it.
-        #     # T.RandomHorizontalFlip(),
-        #     # T.RandomVerticalFlip(),
-        #     T.RandomRotation(180),
         ])
     )
-    print('Train dataset size:', len(train_dataset))
+    print('[*] Train dataset size:', len(train_dataset))
+
     val_dataset = data.SatellitePatchesDataset(
         dir_rgb=data.VAL_THREE_BAND_DATA_PATH,
         dir_multichannel=data.VAL_SIXTEEN_BAND_DATA_PATH,
@@ -172,7 +169,7 @@ if __name__ == '__main__':
                      12.552, 24.351, 46.557, 60.684, 63.107, 60.408, 83.752, 66.97, 53.74]),
         ])
     )
-    print('Val dataset size:', len(val_dataset))
+    print('[*] Val dataset size:', len(val_dataset))
 
     # Configure data loaders
     batch_size = 42
@@ -184,7 +181,6 @@ if __name__ == '__main__':
     ts_writer = SummaryWriter(log_dir='runs/stage-2')
 
     # Configure model, optimizer, scheduler, loss
-    # TODO: maybe I should initialize model weights using some strategy?
     unet = model.UNet(20, 10).to(DEVICE)
     optimizer = optim.Adam(unet.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
@@ -195,7 +191,7 @@ if __name__ == '__main__':
     n_epochs = 100
     best_val_loss = float('inf')
     if os.path.isfile('checkpoints/best_model.pth'):
-        print('Found previous best model checkpoint. Using it...')
+        print('[*] Found previous best model checkpoint. Using it...')
         start_epoch, _ = load_checkpoint('checkpoints/best_model.pth', unet, optimizer, scheduler)
 
     try:
@@ -220,7 +216,7 @@ if __name__ == '__main__':
 
                 running_loss += loss.item()
                 total_batches += 1
-                print(f'Epoch [{epoch}/{n_epochs}] Finished batch')
+                # print(f'Epoch [{epoch}/{n_epochs}] Finished batch')
 
             # Sync cuda kernels for more accurate time measurement
             torch.cuda.synchronize()
@@ -236,9 +232,9 @@ if __name__ == '__main__':
 
             print(f'Epoch [{epoch}/{n_epochs}]: \n'
                   f'Avg. batch loss: {running_loss / total_batches}\n'
-                  f'Avg. validation batch loss: {metrics['Loss']}'
-                  f'Mean IoU per class: {metrics['IoU']}\n'
-                  f'Mean Dice per class: {metrics['Dice']}\n'
+                  f'Avg. validation batch loss: {metrics["Loss"]}\n'
+                  f'Mean batch IoU per class: {metrics["IoU"]}\n'
+                  f'Mean batch Dice per class: {metrics["Dice"]}\n'
                   f'Mean IoU across classes: {mean_iou}\n'
                   f'Mean Dice across classes: {mean_dice}\n')
 
@@ -247,8 +243,8 @@ if __name__ == '__main__':
             ts_writer.add_scalar(f'Loss/Average batch loss', running_loss / total_batches, epoch)
             ts_writer.add_scalar(f'Loss/Average validation batch loss', metrics['Loss'], epoch)
             for class_idx, (iou_score, dice_score) in enumerate(zip(metrics['IoU'], metrics['Dice'])):
-                ts_writer.add_scalar(f"IoU/Class_{class_idx}", iou_score, epoch)
-                ts_writer.add_scalar(f"Dice/Class_{class_idx}", dice_score, epoch)
+                ts_writer.add_scalar(f"IoU/Class_{class_idx+1}", iou_score, epoch)
+                ts_writer.add_scalar(f"Dice/Class_{class_idx+1}", dice_score, epoch)
             ts_writer.add_scalar("Mean IoU", mean_iou, epoch)
             ts_writer.add_scalar("Mean Dice", mean_dice, epoch)
             for param_group in optimizer.param_groups:
@@ -258,8 +254,8 @@ if __name__ == '__main__':
             if metrics['Loss'] < best_val_loss:
                 best_val_loss = metrics['Loss']
                 save_checkpoint(unet, optimizer, scheduler, epoch+1, metrics['Loss'], filename='best_model.pth')
-                print(f'Saved best model checkpoint at epoch {epoch}')
+                print(f'[*] Saved best model checkpoint at epoch {epoch}')
             save_checkpoint(unet, optimizer, scheduler, epoch+1, metrics['Loss'], filename=f'checkpoint_epoch.pth')
-            print(f'Saved general model checkpoint at epoch {epoch}')
+            print(f'[*] Saved general model checkpoint at epoch {epoch}')
     finally:
         ts_writer.close()

@@ -133,6 +133,13 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None):
 
 
 if __name__ == '__main__':
+    data_norm_transform = T.Normalize(
+        mean=[443.364, 475.359, 337.357, 4374.448, 4753.808, 4407.794, 3952.333, 3118.967, 2802.66, 2726.332,
+              2649.713, 300.996, 337.497, 475.59, 502.32, 443.828, 533.503, 671.433, 523.904, 502.551],
+        std=[63.389, 46.704, 24.334, 488.665, 653.793, 587.365, 544.229, 527.288, 460.02, 479.865, 482.814,
+             12.552, 24.351, 46.557, 60.684, 63.107, 60.408, 83.752, 66.97, 53.74]
+    )
+
     train_dataset = data.SatellitePatchesDataset(
         dir_rgb=data.TRAIN_THREE_BAND_DATA_PATH,
         dir_multichannel=data.TRAIN_SIXTEEN_BAND_DATA_PATH,
@@ -143,12 +150,10 @@ if __name__ == '__main__':
         patch_size=224,
         use_dih4_transforms=True,
         transform=T.transforms.Compose([
-            T.Normalize(
-                mean=[443.364, 475.359, 337.357, 4374.448, 4753.808, 4407.794, 3952.333, 3118.967, 2802.66, 2726.332,
-                      2649.713, 300.996, 337.497, 475.59, 502.32, 443.828, 533.503, 671.433, 523.904, 502.551],
-                std=[63.389, 46.704, 24.334, 488.665, 653.793, 587.365, 544.229, 527.288, 460.02, 479.865, 482.814,
-                     12.552, 24.351, 46.557, 60.684, 63.107, 60.408, 83.752, 66.97, 53.74]),
-        ])
+            data_norm_transform
+        ]),
+        load_images_eagerly=False,
+        create_masks_eagerly=False
     )
     print('[*] Train dataset size:', len(train_dataset))
 
@@ -162,12 +167,10 @@ if __name__ == '__main__':
         patch_size=224,
         use_dih4_transforms=True,
         transform=T.transforms.Compose([
-            T.Normalize(
-                mean=[443.364, 475.359, 337.357, 4374.448, 4753.808, 4407.794, 3952.333, 3118.967, 2802.66, 2726.332,
-                      2649.713, 300.996, 337.497, 475.59, 502.32, 443.828, 533.503, 671.433, 523.904, 502.551],
-                std=[63.389, 46.704, 24.334, 488.665, 653.793, 587.365, 544.229, 527.288, 460.02, 479.865, 482.814,
-                     12.552, 24.351, 46.557, 60.684, 63.107, 60.408, 83.752, 66.97, 53.74]),
-        ])
+            data_norm_transform
+        ]),
+        load_images_eagerly=False,
+        create_masks_eagerly=False
     )
     print('[*] Val dataset size:', len(val_dataset))
 
@@ -178,7 +181,7 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, worker_init_fn=worker_init_fn)
 
     # Configure TensorBoard writer
-    ts_writer = SummaryWriter(log_dir='runs/stage-2')
+    ts_writer = SummaryWriter(log_dir='runs/stage-4')
 
     # Configure model, optimizer, scheduler, loss
     unet = model.UNet(20, 10).to(DEVICE)

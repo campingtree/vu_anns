@@ -249,14 +249,14 @@ def calculate_mean_stddev(dataset):
 
     return mean.cpu().tolist(), std.cpu().tolist()
 
-def plot_patch_and_individual_masks(patch, masks):
+def plot_img_and_individual_masks(img, masks):
     """
-    Plots a single image patch and all individual binary segmentation masks side by side.
+    Plots a single image and all 10 individual binary segmentation masks side by side.
     """
     assert masks.shape[0] == 10
 
     fig, ax = plt.subplots(2, 6, figsize=(12, 6))
-    ax[0, 0].imshow((patch[:3,:,:] / patch[:3,:,:].max()).permute(1, 2, 0))
+    ax[0, 0].imshow((img[:3, :, :] / img[:3, :, :].max()).permute(1, 2, 0))
     ax[0, 0].set_title("RGB Image")
     ax[0, 1].imshow(masks[0], cmap='gray')
     ax[0, 1].set_title('Mask 1')

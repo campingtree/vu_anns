@@ -135,7 +135,7 @@ class SatellitePatchesDataset(Dataset):
                 patch_image = self.dih4_transforms[trans_id](patch_image)
                 patch_mask = self.dih4_transforms[trans_id](patch_mask)
 
-        # helpers.plot_patch_and_individual_masks(patch_image, patch_mask)
+        # helpers.plot_img_and_individual_masks(patch_image, patch_mask)
 
         return patch_image, patch_mask
 

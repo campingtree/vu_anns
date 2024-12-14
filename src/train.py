@@ -11,7 +11,8 @@ from torch.utils.data import DataLoader
 import torchvision.transforms as T
 
 import data
-import model
+import models
+import transforms
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -133,13 +134,6 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None):
 
 
 if __name__ == '__main__':
-    data_norm_transform = T.Normalize(
-        mean=[443.364, 475.359, 337.357, 4374.448, 4753.808, 4407.794, 3952.333, 3118.967, 2802.66, 2726.332,
-              2649.713, 300.996, 337.497, 475.59, 502.32, 443.828, 533.503, 671.433, 523.904, 502.551],
-        std=[63.389, 46.704, 24.334, 488.665, 653.793, 587.365, 544.229, 527.288, 460.02, 479.865, 482.814,
-             12.552, 24.351, 46.557, 60.684, 63.107, 60.408, 83.752, 66.97, 53.74]
-    )
-
     train_dataset = data.SatellitePatchesDataset(
         dir_rgb=data.TRAIN_THREE_BAND_DATA_PATH,
         dir_multichannel=data.TRAIN_SIXTEEN_BAND_DATA_PATH,
@@ -150,7 +144,7 @@ if __name__ == '__main__':
         patch_size=224,
         use_dih4_transforms=True,
         transform=T.transforms.Compose([
-            data_norm_transform
+            transforms.NormTransforms.get_unit_dev_transform()
         ]),
         load_images_eagerly=False,
         create_masks_eagerly=False
@@ -167,7 +161,7 @@ if __name__ == '__main__':
         patch_size=224,
         use_dih4_transforms=True,
         transform=T.transforms.Compose([
-            data_norm_transform
+            transforms.NormTransforms.get_unit_dev_transform()
         ]),
         load_images_eagerly=False,
         create_masks_eagerly=False
@@ -184,7 +178,7 @@ if __name__ == '__main__':
     ts_writer = SummaryWriter(log_dir='runs/stage-4')
 
     # Configure model, optimizer, scheduler, loss
-    unet = model.UNet(20, 10).to(DEVICE)
+    unet = models.UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE)
     optimizer = optim.Adam(unet.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
     criterion = nn.BCELoss().to(DEVICE)

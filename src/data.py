@@ -44,6 +44,7 @@ CLASS_TYPES = {
     9:  'Vehicle large',
     10: 'Vehicle small'
 }
+COLOR_CHANNEL_COUNT = 20
 
 
 class SatellitePatchesDataset(Dataset):
@@ -55,6 +56,7 @@ class SatellitePatchesDataset(Dataset):
                  class_ids,
                  image_size=3360,
                  patch_size=224,
+                 image_ids=None,
                  use_dih4_transforms=False,
                  transform=None,
                  load_images_eagerly=False,
@@ -63,7 +65,7 @@ class SatellitePatchesDataset(Dataset):
         self.dir_multichannel = dir_multichannel
         self.labels_df = pd.read_csv(label_file, names=['ImageId', 'ClassType', 'MultipolygonWKT'], skiprows=1)
         self.scaling_data_df = pd.read_csv(grid_file, names=['ImageId', 'Xmax', 'Ymin'], skiprows=1)
-        self.image_ids = self.labels_df['ImageId'].unique()
+        self.image_ids = self.labels_df['ImageId'].unique() if not image_ids else image_ids
         self.class_ids = class_ids
         self.image_size = image_size
         self.patch_size = patch_size
@@ -85,12 +87,13 @@ class SatellitePatchesDataset(Dataset):
                 self.masks[image_id] = mask
 
         self.dih4_transforms = Dih4Transforms.get_transforms() if use_dih4_transforms else None
+        self.transform = transform
 
         # Only supporting ideal patching for now
         assert image_size % patch_size == 0
 
         # Precompute number of patches
-        self.patches_per_side = self.image_size//self.patch_size
+        self.patches_per_side = self.image_size // self.patch_size
         self.patches_per_image = self.patches_per_side**2
         self.patches_total = len(self.image_ids) * self.patches_per_image
 
@@ -110,6 +113,8 @@ class SatellitePatchesDataset(Dataset):
             image = self.images[image_id]
         else:
             image = self._get_image(image_id, self.image_size)
+            if self.transform:
+                image = self.transform(image)
         if self.masks:
             mask = self.masks[image_id]
         else:
@@ -136,6 +141,8 @@ class SatellitePatchesDataset(Dataset):
                 patch_mask = self.dih4_transforms[trans_id](patch_mask)
 
         # helpers.plot_img_and_individual_masks(patch_image, patch_mask)
+        # helpers.plot_img_and_individual_masks(image, mask)
+        # exit()
 
         return patch_image, patch_mask
 
@@ -171,7 +178,7 @@ class SatellitePatchesDataset(Dataset):
 
         # Combine along channel dimension
         combined_img = torch.cat((img_rgb, *imgs_multichannel), dim=0)  # MULTI_CxHxW
-        assert combined_img.shape[0] == 20
+        assert combined_img.shape[0] == COLOR_CHANNEL_COUNT
 
         return combined_img
 

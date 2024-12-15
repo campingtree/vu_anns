@@ -18,8 +18,7 @@ def load_model_params(model, filepath):
     """
     checkpoint = torch.load(filepath)
     model.load_state_dict(checkpoint['model_state_dict'])
-    print(f'epoch: {checkpoint["epoch"]}')
-    print(f'loss: {checkpoint["loss"]}')
+    print(f'[*] Loaded model trained on {checkpoint["epoch"]-1} epochs with loss {checkpoint["loss"]}')
 
 
 def infer_display(model,
@@ -47,7 +46,7 @@ def infer_display(model,
         load_images_eagerly=True,
         create_masks_eagerly=True
     )
-    batch_size = 15
+    batch_size = 8
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     # Optionally load weights
@@ -121,9 +120,15 @@ def infer_display(model,
 
 
 if __name__ == '__main__':
-    unet = models.UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE)
-    # infer(unet, '6100_2_2', 'checkpoint_epoch.pth')
-    # infer(unet, '6070_2_3', 'checkpoint_epoch.pth')
-    # infer(unet, '6100_2_3', 'checkpoint_epoch.pth')
-    # infer(unet, '6100_1_3', 'checkpoint_epoch.pth')
-    infer_display(unet, '6110_3_1', 'checkpoint_epoch.pth')
+    # unet = models.UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE)
+    unet = models.Res50UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE)
+    # print(unet)
+    model_total_params = sum(p.numel() for p in unet.parameters())
+    print(f'[*] Total number of params in model: {model_total_params}')
+    print(unet)
+    # exit()
+    # infer_display(unet, '6100_2_2', 'checkpoint_epoch.pth')
+    # infer_display(unet, '6070_2_3', 'checkpoint_epoch.pth')
+    # infer_display(unet, '6100_2_3', 'checkpoint_epoch.pth')
+    # infer_display(unet, '6100_1_3', 'checkpoint_epoch.pth')
+    infer_display(unet, '6110_3_1')

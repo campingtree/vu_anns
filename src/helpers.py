@@ -307,7 +307,7 @@ def plot_all_masks_as_overlay(built_masks, train_masks=None, image=None):
         mask = built_masks[i]
         color = colors[i].view(1, 1, 4)
         overlay_built += mask.unsqueeze(-1) * color
-    if not train_masks is None:
+    if train_masks is not None:
         overlay_train = torch.zeros(train_masks.shape[1], train_masks.shape[2], 4)  # HxWx4
         for i in range(len(data.CLASS_TYPES)):
             mask = train_masks[i]
@@ -316,19 +316,19 @@ def plot_all_masks_as_overlay(built_masks, train_masks=None, image=None):
 
     # Clip the overlay to ensure valid RGBA values (0-1 range)
     overlay_built = overlay_built.clamp(0, 1)
-    if not train_masks is None:
+    if train_masks is not None:
         overlay_train = overlay_train.clamp(0, 1)
 
     # BUG: displaying the RGB image with correct colors requires it to be "un-normalized"
-    if not image is None:
+    if image is not None:
         assert image.shape[0] >= 3
         rgb = image[:3].permute(1, 2, 0).clone()
         rgb -= rgb.min()
         rgb /= rgb.max()
 
-    fig, ax = plt.subplots(1, 2 if not train_masks is None else 1, figsize=(12, 12))
-    if not train_masks is None:
-        if not image is None:
+    fig, ax = plt.subplots(1, 2 if train_masks is not None else 1, figsize=(12, 12))
+    if train_masks is not None:
+        if image is not None:
             ax[0].imshow(rgb)
             ax[1].imshow(rgb)
         ax[0].set_title('Training data mask')
@@ -340,7 +340,7 @@ def plot_all_masks_as_overlay(built_masks, train_masks=None, image=None):
         ax[1].set_ylabel('Height pixels')
         ax[1].imshow(overlay_built)
     else:
-        if not image is None:
+        if image is not None:
             ax.imshow(rgb)
         ax.set_title('Produced mask')
         ax.set_xlabel('Width pixels')

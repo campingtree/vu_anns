@@ -175,13 +175,16 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, worker_init_fn=worker_init_fn)
 
     # Configure TensorBoard writer
-    ts_writer = SummaryWriter(log_dir='runs/stage-4')
+    ts_writer = SummaryWriter(log_dir='runs/stage-4/unet')
 
     # Configure model, optimizer, scheduler, loss
     unet = models.UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE)
     optimizer = optim.Adam(unet.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
     criterion = nn.BCELoss().to(DEVICE)
+
+    model_total_params = sum(p.numel() for p in unet.parameters())
+    print(f'[*] Total number of params in model: {model_total_params}')
 
     # Training loop parameters
     start_epoch = 1

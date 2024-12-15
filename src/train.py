@@ -231,6 +231,7 @@ if __name__ == '__main__':
             scheduler.step(metrics['Loss'])
 
             print(f'Epoch [{epoch}/{n_epochs}]: \n'
+                  f'Duration: {epoch_duration} \n'
                   f'Avg. batch loss: {running_loss / total_batches}\n'
                   f'Avg. validation batch loss: {metrics["Loss"]}\n'
                   f'Mean batch IoU per class: {metrics["IoU"]}\n'

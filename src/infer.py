@@ -46,7 +46,7 @@ def infer_display(model,
         load_images_eagerly=True,
         create_masks_eagerly=True
     )
-    batch_size = 8
+    batch_size = 42
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
 
     # Optionally load weights
@@ -56,7 +56,6 @@ def infer_display(model,
 
     # Perform inference, gather true and built masks
     model.eval()
-    patches = []
     mask_train = []
     mask_built = []
     iou_scores = []
@@ -69,7 +68,6 @@ def infer_display(model,
             output = model(images)
             preds = (output > 0.2)
 
-            patches.append(images)
             mask_train.append(masks)
             mask_built.append(preds)
 
@@ -84,9 +82,6 @@ def infer_display(model,
     mean_dice = torch.stack(dice_scores, dim=0).mean(dim=0).cpu()
     print(f'[Dice]. Total mean {mean_dice.mean()}: Per class {mean_dice}')
 
-    patches = torch.cat(patches, dim=0)
-    assert patches.shape[0] == dataset.patches_per_image
-
     mask_train = torch.cat(mask_train, dim=0)
     assert mask_train.shape[0] == dataset.patches_per_image
 
@@ -94,15 +89,10 @@ def infer_display(model,
     assert mask_built.shape[0] == dataset.patches_per_image
 
     # Reshape to (PATCH_PER_SIDExPATCH_PER_SIDExCxHxW)
-    img_grid = patches.view(dataset.patches_per_side, dataset.patches_per_side, patches.shape[1], patches.shape[2], patches.shape[3])
     mask_train_grid = mask_train.view(dataset.patches_per_side, dataset.patches_per_side, mask_train.shape[1], mask_train.shape[2], mask_train.shape[3])
     mask_built_grid = mask_built.view(dataset.patches_per_side, dataset.patches_per_side, mask_built.shape[1], mask_built.shape[2], mask_built.shape[3])
 
     # Permute dimensions for concat into original image shape (CxHxW)
-    full_image = torch.cat(
-        [torch.cat([img_grid[i, j] for j in range(dataset.patches_per_side)], dim=-1) for i in range(dataset.patches_per_side)],
-        dim=-2
-    ).cpu()
     full_train_mask = torch.cat(
         [torch.cat([mask_train_grid[i, j] for j in range(dataset.patches_per_side)], dim=-1) for i in range(dataset.patches_per_side)],
         dim=-2
@@ -115,20 +105,18 @@ def infer_display(model,
     helpers.plot_all_masks_as_overlay(
         full_built_mask,
         train_masks=full_train_mask if also_display_train_mask else None)
+    # full_image = dataset._get_image(image_id, dataset.image_size)
     # helpers.plot_img_and_individual_masks(full_image, full_built_mask)
 
 
 
 if __name__ == '__main__':
-    # unet = models.UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE)
-    unet = models.Res50UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE)
-    # print(unet)
-    model_total_params = sum(p.numel() for p in unet.parameters())
-    print(f'[*] Total number of params in model: {model_total_params}')
-    print(unet)
-    # exit()
+    unet = models.UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE)
+    # unet = models.Res50UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE)
     # infer_display(unet, '6100_2_2', 'checkpoint_epoch.pth')
     # infer_display(unet, '6070_2_3', 'checkpoint_epoch.pth')
     # infer_display(unet, '6100_2_3', 'checkpoint_epoch.pth')
     # infer_display(unet, '6100_1_3', 'checkpoint_epoch.pth')
-    infer_display(unet, '6110_3_1')
+    # infer_display(unet, '6110_3_1', 'checkpoints_old_bcedice_l4/checkpoint_epoch.pth')
+    # infer_display(unet, '6100_1_3', 'checkpoints_old/checkpoint_epoch.pth')
+    infer_display(unet, '6070_2_3', 'checkpoints_old/checkpoint_epoch.pth')

@@ -195,45 +195,30 @@ class Res50UNet(nn.Module):
         self.act_final = nn.Sigmoid()
 
     def forward(self, x):
-        # TODO: cleanup prints bellow
         # encode
-        # print(f'x: {x.shape}')
         enc1 = self.encoder1(x)
-#         print(f'enc1 (custom): {enc1.shape}')
         enc1_down = self.encoder1_maxpool(enc1)
-#         print(f'encoder1_maxpool: {enc1_down.shape}')
         enc2 = self.encoder2(enc1_down)
-#         print(f'enc2: {enc2.shape}')
         enc3 = self.encoder3(enc2)
-#         print(f'enc3: {enc3.shape}')
         enc4 = self.encoder4(enc3)
-#         print(f'enc4: {enc4.shape}')
 
         # bottleneck
         enc5_bottleneck = self.encoder5_bottleneck(enc4)
-#         print(f'enc5_bottleneck: {enc5_bottleneck.shape}')
 
         # decode
         dec4 = torch.cat((self.sample_up_4(enc5_bottleneck), enc4), dim=1)
         dec4 = self.conv_up_4(dec4)
-#         print(f'dec1: {dec4.shape}')
 
         dec3 = torch.cat((self.sample_up_3(dec4), enc3), dim=1)
         dec3 = self.conv_up_3(dec3)
-#         print(f'dec1: {dec3.shape}')
 
         dec2 = torch.cat((self.sample_up_2(dec3), enc2), dim=1)
         dec2 = self.conv_up_2(dec2)
-#         print(f'dec1: {dec2.shape}')
 
-#         print(self.sample_up_1(dec2).shape)
         dec1 = torch.cat((self.sample_up_1(dec2), enc1), dim=1)
         dec1 = self.conv_up_1(dec1)
-#         print(f'dec1: {dec1.shape}')
 
         # final segmentation to class channels
         out = self.act_final(self.conv_final(dec1))
-#         print(f'out: {out.shape}')
-#         exit()
 
         return out

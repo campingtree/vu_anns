@@ -249,14 +249,14 @@ def calculate_mean_stddev(dataset):
 
     return mean.cpu().tolist(), std.cpu().tolist()
 
-def plot_patch_and_individual_masks(patch, masks):
+def plot_img_and_individual_masks(img, masks):
     """
-    Plots a single image patch and all individual binary segmentation masks side by side.
+    Plots a single image and all 10 individual binary segmentation masks side by side.
     """
     assert masks.shape[0] == 10
 
     fig, ax = plt.subplots(2, 6, figsize=(12, 6))
-    ax[0, 0].imshow((patch[:3,:,:] / patch[:3,:,:].max()).permute(1, 2, 0))
+    ax[0, 0].imshow((img[:3, :, :] / img[:3, :, :].max()).permute(1, 2, 0))
     ax[0, 0].set_title("RGB Image")
     ax[0, 1].imshow(masks[0], cmap='gray')
     ax[0, 1].set_title('Mask 1')
@@ -282,6 +282,75 @@ def plot_patch_and_individual_masks(patch, masks):
     fig.delaxes(ax[1, 5])
     plt.tight_layout()
     plt.show()
+
+def plot_all_masks_as_overlay(built_masks, train_masks=None, image=None):
+    """
+    Plots all masks as ARGB overlay on a single image.
+
+    Optionally plot train_masks side by side with optional image in the background.
+    """
+    # Create combined segmentation mask
+    colors = torch.tensor([
+        [0.8, 0.1, 0.1, 0.4],  # Buildings (Dark Red)
+        [0.9, 0.5, 0.1, 0.4],  # Small structures (Orange)
+        [0.1, 0.5, 0.8, 0.4],  # Good roads (Blue)
+        [0.6, 0.4, 0.2, 0.4],  # Dirt/footpath tracks (Brown)
+        [0.1, 0.8, 0.1, 0.4],  # Trees/woods (Green)
+        [0.8, 0.8, 0.1, 0.4],  # Cropland (Yellow)
+        [0.1, 0.1, 0.8, 0.4],  # Waterway (Dark Blue)
+        [0.1, 0.6, 0.6, 0.4],  # Standing water (Cyan)
+        [0.6, 0.1, 0.6, 0.4],  # Vehicle large (Purple)
+        [0.9, 0.9, 0.9, 0.4],  # Vehicle small (Light Grey)
+    ])
+    overlay_built = torch.zeros(built_masks.shape[1], built_masks.shape[2], 4)  # HxWx4
+    for i in range(len(data.CLASS_TYPES)):
+        mask = built_masks[i]
+        color = colors[i].view(1, 1, 4)
+        overlay_built += mask.unsqueeze(-1) * color
+    if train_masks is not None:
+        overlay_train = torch.zeros(train_masks.shape[1], train_masks.shape[2], 4)  # HxWx4
+        for i in range(len(data.CLASS_TYPES)):
+            mask = train_masks[i]
+            color = colors[i].view(1, 1, 4)
+            overlay_train += mask.unsqueeze(-1) * color
+
+    # Clip the overlay to ensure valid RGBA values (0-1 range)
+    overlay_built = overlay_built.clamp(0, 1)
+    if train_masks is not None:
+        overlay_train = overlay_train.clamp(0, 1)
+
+    # BUG: displaying the RGB image with correct colors requires it to be "un-normalized"
+    if image is not None:
+        assert image.shape[0] >= 3
+        rgb = image[:3].permute(1, 2, 0).clone()
+        rgb -= rgb.min()
+        rgb /= rgb.max()
+
+    fig, ax = plt.subplots(1, 2 if train_masks is not None else 1, figsize=(12, 12))
+    if train_masks is not None:
+        if image is not None:
+            ax[0].imshow(rgb)
+            ax[1].imshow(rgb)
+        ax[0].set_title('Training data mask')
+        ax[0].set_xlabel('Width pixels')
+        ax[0].set_ylabel('Height pixels')
+        ax[0].imshow(overlay_train)
+        ax[1].set_title('Produced mask')
+        ax[1].set_xlabel('Width pixels')
+        ax[1].set_ylabel('Height pixels')
+        ax[1].imshow(overlay_built)
+    else:
+        if image is not None:
+            ax.imshow(rgb)
+        ax.set_title('Produced mask')
+        ax.set_xlabel('Width pixels')
+        ax.set_ylabel('Height pixels')
+        ax.imshow(overlay_built)
+    plt.xticks(np.arange(0, built_masks.shape[2], step=500))
+    plt.yticks(np.arange(0, built_masks.shape[1], step=500))
+    plt.tight_layout()
+    plt.show()
+
 
 if __name__ == '__main__':
     # dataset = data.SatellitePatchesDataset(
@@ -318,7 +387,7 @@ if __name__ == '__main__':
     # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6110_1_1.tif')
     # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6100_2_3.tif')
     # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6110_1_2.tif')
-    # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6110_1_3.tif')
+    visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6110_1_3.tif')
     # visualize_tif('../../dstl-satellite-imagery-feature-detection/three_band/6110_1_4.tif')
-    visualize_tif_multi('../../dstl-satellite-imagery-feature-detection/sixteen_band/6110_1_3_P.tif')
-    visualize_tif_multi('../../dstl-satellite-imagery-feature-detection/sixteen_band/6110_1_3_P.tif', (3000, 3000))
+    # visualize_tif_multi('../../dstl-satellite-imagery-feature-detection/sixteen_band/6110_1_3_P.tif')
+    # visualize_tif_multi('../../dstl-satellite-imagery-feature-detection/sixteen_band/6110_1_3_P.tif', (3000, 3000))

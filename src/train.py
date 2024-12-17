@@ -8,14 +8,38 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 import torchvision.transforms as T
 
 import data
-import model
+import models
+import transforms
 
 
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 SEED = random.randrange(sys.maxsize)
+
+
+class BCEDiceLoss(nn.Module):
+    def __init__(self, smooth=1e-6, lambda_dice=1.0):
+        super().__init__()
+        self.smooth = smooth
+        self.lambda_dice = lambda_dice
+
+    def forward(self, y_pred, y_true):
+        y_pred = torch.sigmoid(y_pred)
+        y_true = y_true.float()
+
+        # BCE Loss
+        bce = F.binary_cross_entropy(y_pred, y_true, reduction='mean')
+
+        # Dice Loss
+        intersection = (y_true * y_pred).sum(dim=(2, 3))
+        union = y_true.sum(dim=(2, 3)) + y_pred.sum(dim=(2, 3))
+        dice = 1 - (2.0 * intersection + self.smooth) / (union + self.smooth)
+        dice = dice.mean()
+
+        return bce + self.lambda_dice * dice
 
 
 def worker_init_fn(worker_id):
@@ -76,19 +100,6 @@ def eval_model(model, eval_dataloader, epoch, device, criterion, threshold=0.5):
             iou_scores.append(iou)
             dice_scores.append(dice)
 
-            # if ts_writer and not ts_writen:
-                # ts_writen = True
-                # sample_image = images[0]
-                # sample_mask = masks[0]
-                # sample_pred = preds[0]
-                # # mask_stack = torch.cat([sample_mask, sample_pred], dim=2)  # Stack masks horizontally
-                # mask_stack = torch.cat([sample_mask, sample_pred], dim=0)  # Stack masks horizontally # BUG: same here...
-                # # visualization = torch.cat([sample_image, mask_stack], dim=1)  # Stack vertically
-                # visualization = torch.cat([sample_image, mask_stack], dim=0)  # BUG: not alligned, need to see how this looks in tensorboard
-                # ts_writer.add_image("Sample/Visualization", visualization, epoch)
-
-                # ts_writer.add_histogram('Sample/Distribution', preds, epoch)
-
             running_loss += loss.item()
             total_batches += 1
 
@@ -131,6 +142,37 @@ def load_checkpoint(filepath, model, optimizer=None, scheduler=None):
 
     return epoch, loss
 
+def try_freeze_backbone(model):
+    """
+    Freezes model backbone (if model has a backbone).
+    """
+    if isinstance(model, nn.DataParallel):
+        model = model.module
+    if not isinstance(model, (models.Res50UNet,)):
+        return
+    print('[!] Freezing backbone...')
+    for param in model.backbone.parameters():
+        param.requires_grad = False
+
+def try_unfreeze_backbone(model, epoch, last_layer_freeze_duration, total_freeze_duration):
+    """
+    Gradually unfreezes the backbone (if model has a backbone).
+    """
+    if isinstance(model, nn.DataParallel):
+        model = model.module
+    if not isinstance(model, (models.Res50UNet,)):
+        return
+    assert last_layer_freeze_duration <= total_freeze_duration
+    if epoch > last_layer_freeze_duration:
+        print('[*] Unfreezing backbone layer4...')
+        for param in model.backbone.layer4.parameters():
+            param.requires_grad = True
+    if epoch > total_freeze_duration:
+        print('[*] Unfreezing entire backbone...')
+        for param in model.backbone.parameters():
+            param.requires_grad = True
+
+
 
 if __name__ == '__main__':
     train_dataset = data.SatellitePatchesDataset(
@@ -143,12 +185,10 @@ if __name__ == '__main__':
         patch_size=224,
         use_dih4_transforms=True,
         transform=T.transforms.Compose([
-            T.Normalize(
-                mean=[443.364, 475.359, 337.357, 4374.448, 4753.808, 4407.794, 3952.333, 3118.967, 2802.66, 2726.332,
-                      2649.713, 300.996, 337.497, 475.59, 502.32, 443.828, 533.503, 671.433, 523.904, 502.551],
-                std=[63.389, 46.704, 24.334, 488.665, 653.793, 587.365, 544.229, 527.288, 460.02, 479.865, 482.814,
-                     12.552, 24.351, 46.557, 60.684, 63.107, 60.408, 83.752, 66.97, 53.74]),
-        ])
+            transforms.NormTransforms.get_unit_dev_transform()
+        ]),
+        load_images_eagerly=False,
+        create_masks_eagerly=False
     )
     print('[*] Train dataset size:', len(train_dataset))
 
@@ -162,12 +202,10 @@ if __name__ == '__main__':
         patch_size=224,
         use_dih4_transforms=True,
         transform=T.transforms.Compose([
-            T.Normalize(
-                mean=[443.364, 475.359, 337.357, 4374.448, 4753.808, 4407.794, 3952.333, 3118.967, 2802.66, 2726.332,
-                      2649.713, 300.996, 337.497, 475.59, 502.32, 443.828, 533.503, 671.433, 523.904, 502.551],
-                std=[63.389, 46.704, 24.334, 488.665, 653.793, 587.365, 544.229, 527.288, 460.02, 479.865, 482.814,
-                     12.552, 24.351, 46.557, 60.684, 63.107, 60.408, 83.752, 66.97, 53.74]),
-        ])
+            transforms.NormTransforms.get_unit_dev_transform()
+        ]),
+        load_images_eagerly=False,
+        create_masks_eagerly=False
     )
     print('[*] Val dataset size:', len(val_dataset))
 
@@ -178,24 +216,36 @@ if __name__ == '__main__':
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, worker_init_fn=worker_init_fn)
 
     # Configure TensorBoard writer
-    ts_writer = SummaryWriter(log_dir='runs/stage-2')
+    ts_writer = SummaryWriter(log_dir='runs/stage-4/unet')
 
     # Configure model, optimizer, scheduler, loss
-    unet = model.UNet(20, 10).to(DEVICE)
+    # unet = nn.DataParallel(models.Res50UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE))
+    unet = models.UNet(data.COLOR_CHANNEL_COUNT, len(data.CLASS_TYPES)).to(DEVICE)
     optimizer = optim.Adam(unet.parameters(), lr=0.001)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
-    criterion = nn.BCELoss().to(DEVICE)
+    # criterion = nn.BCELoss().to(DEVICE)
+    criterion = BCEDiceLoss(lambda_dice=4.0).to(DEVICE)
+
+    model_total_params = sum(p.numel() for p in unet.parameters())
+    print(f'[*] Total number of params in model: {model_total_params}')
+
+    # Configure backbone freezing parameters
+    last_layer_freeze_duration = 10
+    total_freeze_duration = 15
 
     # Training loop parameters
     start_epoch = 1
     n_epochs = 100
     best_val_loss = float('inf')
     if os.path.isfile('checkpoints/best_model.pth'):
-        print('[*] Found previous best model checkpoint. Using it...')
-        start_epoch, _ = load_checkpoint('checkpoints/best_model.pth', unet, optimizer, scheduler)
+        print('[*] Found previous model checkpoint. Using it...')
+        start_epoch, _ = load_checkpoint('checkpoints/checkpoint_epoch.pth', unet, optimizer, scheduler)
+
+    try_freeze_backbone(unet)
 
     try:
         for epoch in range(start_epoch, n_epochs + 1):
+            try_unfreeze_backbone(unet, epoch, last_layer_freeze_duration, total_freeze_duration)
             unet.train()
 
             start_time = time.time()
@@ -218,10 +268,6 @@ if __name__ == '__main__':
                 total_batches += 1
                 # print(f'Epoch [{epoch}/{n_epochs}] Finished batch')
 
-            # Sync cuda kernels for more accurate time measurement
-            torch.cuda.synchronize()
-            epoch_duration = time.time() - start_time
-
             # Get evaluation metrics on validation set
             metrics = eval_model(unet, val_loader, epoch, DEVICE, criterion)
             mean_iou = metrics['IoU'].mean()
@@ -230,13 +276,18 @@ if __name__ == '__main__':
             # Use validation loss to step optimizer scheduler
             scheduler.step(metrics['Loss'])
 
+            # Sync cuda kernels for more accurate time measurement
+            torch.cuda.synchronize()
+            epoch_duration = time.time() - start_time
+
             print(f'Epoch [{epoch}/{n_epochs}]: \n'
+                  f'Duration: {epoch_duration} \n'
                   f'Avg. batch loss: {running_loss / total_batches}\n'
                   f'Avg. validation batch loss: {metrics["Loss"]}\n'
                   f'Mean batch IoU per class: {metrics["IoU"]}\n'
                   f'Mean batch Dice per class: {metrics["Dice"]}\n'
                   f'Mean IoU across classes: {mean_iou}\n'
-                  f'Mean Dice across classes: {mean_dice}\n')
+                  f'Mean Dice across classes: {mean_dice}')
 
             # Log various metrics to TensorBoard
             ts_writer.add_scalar('Time/Epoch', epoch_duration, epoch)
@@ -256,6 +307,6 @@ if __name__ == '__main__':
                 save_checkpoint(unet, optimizer, scheduler, epoch+1, metrics['Loss'], filename='best_model.pth')
                 print(f'[*] Saved best model checkpoint at epoch {epoch}')
             save_checkpoint(unet, optimizer, scheduler, epoch+1, metrics['Loss'], filename=f'checkpoint_epoch.pth')
-            print(f'[*] Saved general model checkpoint at epoch {epoch}')
+            print(f'[*] Saved general model checkpoint at epoch {epoch}\n\n')
     finally:
         ts_writer.close()

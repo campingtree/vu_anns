@@ -131,14 +131,14 @@ class SatellitePatchesDataset(Dataset):
 
         # Apply Dih4 transforms unique to specific image
         if self.dih4_transforms:
-            with torch.random.fork_rng():
-                seed = int(hashlib.md5(f'{image_id}{self.epoch_seed}'.encode()).hexdigest()[:16], 16)
-                torch.manual_seed(seed)
-                torch.cuda.manual_seed(seed)
-                torch.cuda.manual_seed_all(seed)
-                trans_id = torch.randint(0, len(self.dih4_transforms), (1,)).item()
-                patch_image = self.dih4_transforms[trans_id](patch_image)
-                patch_mask = self.dih4_transforms[trans_id](patch_mask)
+            # with torch.random.fork_rng():
+            seed = int(hashlib.md5(f'{image_id}{self.epoch_seed}'.encode()).hexdigest()[:16], 16)
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed(seed)
+            torch.cuda.manual_seed_all(seed)
+            trans_id = torch.randint(0, len(self.dih4_transforms), (1,)).item()
+            patch_image = self.dih4_transforms[trans_id](patch_image)
+            patch_mask = self.dih4_transforms[trans_id](patch_mask)
 
         # helpers.plot_img_and_individual_masks(patch_image, patch_mask)
         # helpers.plot_img_and_individual_masks(image, mask)
